@@ -1,0 +1,104 @@
+
+networks:
+  microservices-net:
+    driver: bridge
+
+volumes:
+  user_db_data:
+  content_db_data:
+
+services:
+  service-discovery:
+    build: ./Service-discovery/Service-discovery
+    networks:
+      - microservices-net
+    ports:
+      - "8761:8761"
+
+  user-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${db-user-password}
+      POSTGRES_DB: user-db
+    volumes:
+      - user_db_data:/var/lib/postgres/data
+    networks:
+      - microservices-net
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U admin -d user-db" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  content-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${db-content-password}
+      POSTGRES_DB: content-db
+    networks:
+      - microservices-net
+    volumes:
+      - content_db_data:/var/lib/postgres/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U admin -d content-db" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  apigateway:
+    build: ./APIGATEWAY/APIGATEWAY
+    ports:
+      - "8080:8080"
+    depends_on:
+      - service-discovery
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://Service-discovery:8761/eureka/
+      SPRING_APPLICATION_NAME: APIGATEWAY
+    networks:
+      - microservices-net
+
+  user-service:
+    build: ./UserService
+    ports:
+      - "8082:8082"
+    depends_on:
+      - service-discovery
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://Service-discovery:8761/eureka/
+      SPRING_APPLICATION_NAME: user-service
+      SPRING_DATASOURCE_URL: jdbc:postgresql://user-db:5432/user-db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: ${db-user-password}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    networks:
+      - microservices-net
+
+  content-submission-service:
+    build: ./content-submission-service
+    ports:
+      - "8081:8081"
+    depends_on:
+      - service-discovery
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://Service-discovery:8761/eureka/
+      SPRING_APPLICATION_NAME: content-submission-service
+      SPRING_DATASOURCE_URL: jdbc:postgresql://content-db:5432/content-db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: ${db-content-password}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    networks:
+      - microservices-net
+
+  ai-service:
+    build: ./AI-Service/AI-Service
+    ports:
+      - "8083:8083"
+    depends_on:
+      - service-discovery
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://Service-discovery:8761/eureka/
+      SPRING_APPLICATION_NAME: AI-SERVICE
+    networks:
+      - microservices-net
