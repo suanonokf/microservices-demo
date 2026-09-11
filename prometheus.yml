@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: 'Microservices'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['user-service:8082','service-discovery:8761','content-submission-service:8081','apigateway:8080','ai-service:8083']

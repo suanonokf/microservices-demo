@@ -1,4 +1,3 @@
-
 networks:
   microservices-net:
     driver: bridge
@@ -26,7 +25,7 @@ services:
     networks:
       - microservices-net
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U admin -d user-db" ]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d user-db" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -42,19 +41,27 @@ services:
     volumes:
       - content_db_data:/var/lib/postgres/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U admin -d content-db" ]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d content-db" ]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - microservices-net
+
   apigateway:
     build: ./APIGATEWAY/APIGATEWAY
     ports:
-      - "8080:8080"
+      - "8088:8080"
     depends_on:
       - service-discovery
     environment:
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://Service-discovery:8761/eureka/
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-discovery:8761/eureka/
       SPRING_APPLICATION_NAME: APIGATEWAY
     networks:
       - microservices-net
@@ -66,7 +73,7 @@ services:
     depends_on:
       - service-discovery
     environment:
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://Service-discovery:8761/eureka/
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-discovery:8761/eureka/
       SPRING_APPLICATION_NAME: user-service
       SPRING_DATASOURCE_URL: jdbc:postgresql://user-db:5432/user-db
       SPRING_DATASOURCE_USERNAME: postgres
@@ -81,13 +88,15 @@ services:
       - "8081:8081"
     depends_on:
       - service-discovery
+      - rabbitmq
     environment:
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://Service-discovery:8761/eureka/
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-discovery:8761/eureka/
       SPRING_APPLICATION_NAME: content-submission-service
       SPRING_DATASOURCE_URL: jdbc:postgresql://content-db:5432/content-db
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: ${db-content-password}
       SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SPRING_RABBITMQ_HOST: rabbitmq
     networks:
       - microservices-net
 
@@ -97,8 +106,26 @@ services:
       - "8083:8083"
     depends_on:
       - service-discovery
+      - rabbitmq
     environment:
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://Service-discovery:8761/eureka/
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-discovery:8761/eureka/
       SPRING_APPLICATION_NAME: AI-SERVICE
+      SPRING_RABBITMQ_HOST: rabbitmq
+    networks:
+      - microservices-net
+
+  prometheus:
+    image: prom/prometheus
+    networks:
+      - microservices-net
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
     networks:
       - microservices-net
