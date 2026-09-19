@@ -1,3 +1,6 @@
 transformers
 langchain
 langchain-huggingface
+py-eureka-client
+flask
+python-dotenv
