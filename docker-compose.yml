@@ -7,21 +7,36 @@ volumes:
   content_db_data:
 
 services:
+
+  toxicity-analysis-service:
+    build: ./toxicity-analysis-service
+    environment:
+      - EUREKA_SERVER=${EUREKA_URL}
+    networks:
+      - microservices-net
+    ports:
+      - "5000:5000"
+
   service-discovery:
     build: ./Service-discovery/Service-discovery
     networks:
       - microservices-net
     ports:
       - "8761:8761"
+    healthcheck:
+      test: [ "CMD","curl","-f","http://localhost:8761/actuator/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   user-db:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${db-user-password}
+      POSTGRES_PASSWORD: ${DB_USER_PASSWORD}
       POSTGRES_DB: user-db
     volumes:
-      - user_db_data:/var/lib/postgres/data
+      - user_db_data:/var/lib/postgresql/data
     networks:
       - microservices-net
     healthcheck:
@@ -34,12 +49,12 @@ services:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${db-content-password}
+      POSTGRES_PASSWORD: ${DB_CONTENT_PASSWORD}
       POSTGRES_DB: content-db
     networks:
       - microservices-net
     volumes:
-      - content_db_data:/var/lib/postgres/data
+      - content_db_data:/var/lib/postgresql/data
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres -d content-db" ]
       interval: 10s
@@ -53,6 +68,11 @@ services:
       - "15672:15672"
     networks:
       - microservices-net
+    healthcheck:
+      test: ["CMD","rabbitmq-diagnostics","-q","ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   apigateway:
     build: ./APIGATEWAY/APIGATEWAY
@@ -60,6 +80,13 @@ services:
       - "8088:8080"
     depends_on:
       - service-discovery
+
+    healthcheck:
+      test: [ "CMD","curl","-f","http://localhost:8080/actuator/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
     environment:
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-discovery:8761/eureka/
       SPRING_APPLICATION_NAME: APIGATEWAY
@@ -71,14 +98,24 @@ services:
     ports:
       - "8082:8082"
     depends_on:
-      - service-discovery
+      service-discovery:
+         condition: service_healthy
+      user-db:
+        condition: service_healthy
     environment:
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-discovery:8761/eureka/
       SPRING_APPLICATION_NAME: user-service
       SPRING_DATASOURCE_URL: jdbc:postgresql://user-db:5432/user-db
       SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: ${db-user-password}
+      SPRING_DATASOURCE_PASSWORD: ${DB_USER_PASSWORD}
       SPRING_JPA_HIBERNATE_DDL_AUTO: update
+
+    healthcheck:
+      test: [ "CMD","curl","-f","http://localhost:8082/actuator/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
     networks:
       - microservices-net
 
@@ -89,14 +126,22 @@ services:
     depends_on:
       - service-discovery
       - rabbitmq
+      - content-db
     environment:
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-discovery:8761/eureka/
       SPRING_APPLICATION_NAME: content-submission-service
       SPRING_DATASOURCE_URL: jdbc:postgresql://content-db:5432/content-db
       SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: ${db-content-password}
+      SPRING_DATASOURCE_PASSWORD: ${DB_CONTENT_PASSWORD}
       SPRING_JPA_HIBERNATE_DDL_AUTO: update
       SPRING_RABBITMQ_HOST: rabbitmq
+
+    healthcheck:
+      test: [ "CMD","curl","-f","http://localhost:8081/actuator/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
     networks:
       - microservices-net
 
@@ -105,12 +150,21 @@ services:
     ports:
       - "8083:8083"
     depends_on:
-      - service-discovery
-      - rabbitmq
+      service-discovery:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     environment:
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-discovery:8761/eureka/
       SPRING_APPLICATION_NAME: AI-SERVICE
       SPRING_RABBITMQ_HOST: rabbitmq
+
+    healthcheck:
+      test: ["CMD","curl","-f","http://localhost:8083/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
     networks:
       - microservices-net
 
@@ -120,6 +174,17 @@ services:
       - microservices-net
     ports:
       - "9090:9090"
+    depends_on:
+      content-submission-service:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+      apigateway:
+        condition: service_healthy
+      service-discovery:
+        condition: service_healthy
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
 
